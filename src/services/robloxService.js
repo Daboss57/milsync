@@ -182,48 +182,26 @@ class RobloxService {
     }
 
     /**
-     * Get all ranks/roles in a group via Open Cloud API
+     * Get all ranks/roles in a group (legacy API — returns all roles in one call)
      */
     async getGroupRoles(groupId) {
         try {
-            const endpoint = `/cloud/v2/groups/${groupId}/roles?maxPageSize=20`;
-            const data = await this.openCloudRequest(endpoint);
+            const response = await fetch(`${this.groupsUrl}/v1/groups/${groupId}/roles`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-            // Open Cloud returns { groupRoles: [...], nextPageToken }
-            const roles = (data.groupRoles || []).map(role => {
-                // role.path is like "groups/123/roles/456"
-                const id = role.path?.split('/').pop() || role.id;
-                return {
-                    id: id,
-                    name: role.displayName || id,
-                    displayName: role.displayName,
-                    rank: role.rank ?? 0,
-                };
-            });
+            const data = await response.json();
+            const roles = (data.roles || []).map(r => ({
+                id: r.id.toString(),
+                name: r.name,
+                displayName: r.name,
+                rank: r.rank,
+                memberCount: r.memberCount,
+            }));
 
+            logger.info(`Fetched ${roles.length} roles for group ${groupId}`);
             return roles;
         } catch (error) {
             logger.error(`Failed to get group roles: ${error.message}`);
-            // Fallback to legacy API
-            return this.getGroupRolesLegacy(groupId);
-        }
-    }
-
-    /**
-     * Fallback: Get group roles via legacy API
-     */
-    async getGroupRolesLegacy(groupId) {
-        try {
-            const response = await fetch(`${this.groupsUrl}/v1/groups/${groupId}/roles`);
-            if (!response.ok) return [];
-
-            const data = await response.json();
-            return (data.roles || []).map(r => ({
-                ...r,
-                id: r.id.toString(),
-            }));
-        } catch (error) {
-            logger.error(`Failed to get group roles (legacy): ${error.message}`);
             return [];
         }
     }
@@ -268,18 +246,24 @@ class RobloxService {
         try {
             // Get current rank
             const currentRank = await this.getUserGroupRank(userId, groupId);
+            logger.info(`[Promote Debug] User ${userId} current rank data: ${JSON.stringify(currentRank)}`);
+
             if (!currentRank || !currentRank.inGroup) {
                 return { success: false, error: 'User not in group' };
             }
 
             // Get all roles
             const roles = await this.getGroupRoles(groupId);
-            const sortedRoles = roles.sort((a, b) => a.rank - b.rank);
+            const sortedRoles = roles.sort((a, b) => Number(a.rank) - Number(b.rank));
 
-            // Find next rank
-            const currentIndex = sortedRoles.findIndex(r => r.rank === currentRank.rank);
+            logger.info(`[Promote Debug] All roles: ${JSON.stringify(sortedRoles.map(r => ({ id: r.id, name: r.name, rank: r.rank, rankType: typeof r.rank })))}`);
+
+            // Find next rank (use == for type-coerced comparison in case of string/number mismatch)
+            const currentIndex = sortedRoles.findIndex(r => Number(r.rank) === Number(currentRank.rank));
+            logger.info(`[Promote Debug] Looking for rank ${currentRank.rank} (type: ${typeof currentRank.rank}), found at index ${currentIndex} of ${sortedRoles.length}`);
+
             if (currentIndex === -1 || currentIndex === sortedRoles.length - 1) {
-                return { success: false, error: 'Cannot promote further' };
+                return { success: false, error: `Cannot promote further (rank: ${currentRank.rank}, index: ${currentIndex}, total: ${sortedRoles.length})` };
             }
 
             const nextRole = sortedRoles[currentIndex + 1];

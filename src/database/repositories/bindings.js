@@ -1,5 +1,6 @@
 /**
  * Database repository for role bindings
+ * Supports priority-based bindings and nickname templates (RoWifi-style)
  */
 
 const { getDatabase } = require('../init');
@@ -7,20 +8,22 @@ const logger = require('../../utils/logger');
 
 class BindingsRepository {
     /**
-     * Add a role binding (supports multiple roles per rank)
+     * Add a role binding with priority and nickname template
      */
-    static create(guildId, groupId, robloxRankId, robloxRankName, discordRoleId, discordRoleName) {
+    static create(guildId, groupId, robloxRankId, robloxRankName, discordRoleId, discordRoleName, priority = 0, nicknameTemplate = null) {
         const db = getDatabase();
         const stmt = db.prepare(`
-            INSERT INTO role_bindings (guild_id, group_id, roblox_rank_id, roblox_rank_name, discord_role_id, discord_role_name)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO role_bindings (guild_id, group_id, roblox_rank_id, roblox_rank_name, discord_role_id, discord_role_name, priority, nickname_template)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(guild_id, group_id, roblox_rank_id, discord_role_id) DO UPDATE SET
                 roblox_rank_name = excluded.roblox_rank_name,
-                discord_role_name = excluded.discord_role_name
+                discord_role_name = excluded.discord_role_name,
+                priority = excluded.priority,
+                nickname_template = excluded.nickname_template
         `);
-        
-        const result = stmt.run(guildId, groupId, robloxRankId, robloxRankName, discordRoleId, discordRoleName);
-        logger.info(`Created binding: Guild ${guildId}, Group ${groupId}, Rank ${robloxRankId} -> Role ${discordRoleId}`);
+
+        const result = stmt.run(guildId, groupId, robloxRankId, robloxRankName, discordRoleId, discordRoleName, priority, nicknameTemplate);
+        logger.info(`Created binding: Guild ${guildId}, Group ${groupId}, Rank ${robloxRankId} -> Role ${discordRoleId} (priority: ${priority})`);
         return result;
     }
 
@@ -29,16 +32,14 @@ class BindingsRepository {
      */
     static delete(guildId, groupId, robloxRankId, discordRoleId = null) {
         const db = getDatabase();
-        
+
         if (discordRoleId) {
-            // Delete specific role binding
             const stmt = db.prepare(`
                 DELETE FROM role_bindings 
                 WHERE guild_id = ? AND group_id = ? AND roblox_rank_id = ? AND discord_role_id = ?
             `);
             return stmt.run(guildId, groupId, robloxRankId, discordRoleId);
         } else {
-            // Delete all bindings for this rank
             const stmt = db.prepare(`
                 DELETE FROM role_bindings 
                 WHERE guild_id = ? AND group_id = ? AND roblox_rank_id = ?
@@ -57,11 +58,11 @@ class BindingsRepository {
     }
 
     /**
-     * Get all bindings for a guild
+     * Get all bindings for a guild, sorted by priority descending
      */
     static getByGuild(guildId) {
         const db = getDatabase();
-        const stmt = db.prepare('SELECT * FROM role_bindings WHERE guild_id = ? ORDER BY roblox_rank_id');
+        const stmt = db.prepare('SELECT * FROM role_bindings WHERE guild_id = ? ORDER BY priority DESC, roblox_rank_id');
         return stmt.all(guildId);
     }
 
@@ -73,7 +74,7 @@ class BindingsRepository {
         const stmt = db.prepare(`
             SELECT * FROM role_bindings 
             WHERE guild_id = ? AND group_id = ? 
-            ORDER BY roblox_rank_id
+            ORDER BY priority DESC, roblox_rank_id
         `);
         return stmt.all(guildId, groupId);
     }
@@ -91,11 +92,25 @@ class BindingsRepository {
     }
 
     /**
-     * Get Discord role for a specific Roblox rank (legacy - returns first role)
+     * Get the highest-priority binding that matches a user's rank (for nickname template)
      */
-    static getDiscordRole(guildId, groupId, robloxRankId) {
-        const roles = this.getDiscordRoles(guildId, groupId, robloxRankId);
-        return roles.length > 0 ? roles[0] : null;
+    static getHighestPriorityBinding(guildId, groupId, robloxRankId) {
+        const db = getDatabase();
+        const stmt = db.prepare(`
+            SELECT * FROM role_bindings 
+            WHERE guild_id = ? AND group_id = ? AND roblox_rank_id = ?
+            ORDER BY priority DESC
+            LIMIT 1
+        `);
+        return stmt.get(guildId, groupId, robloxRankId);
+    }
+
+    /**
+     * Get the highest-priority binding across all groups for a guild (for nickname resolution)
+     */
+    static getHighestPriorityBindingForGuild(guildId, matchingBindings) {
+        if (!matchingBindings || matchingBindings.length === 0) return null;
+        return matchingBindings.sort((a, b) => (b.priority || 0) - (a.priority || 0))[0];
     }
 
     /**
@@ -105,36 +120,6 @@ class BindingsRepository {
         const db = getDatabase();
         const stmt = db.prepare('SELECT DISTINCT discord_role_id FROM role_bindings WHERE guild_id = ?');
         return stmt.all(guildId).map(r => r.discord_role_id);
-    }
-
-    /**
-     * Bulk import bindings
-     */
-    static bulkImport(guildId, bindings) {
-        const db = getDatabase();
-        const insert = db.prepare(`
-            INSERT INTO role_bindings (guild_id, group_id, roblox_rank_id, roblox_rank_name, discord_role_id, discord_role_name)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(guild_id, group_id, roblox_rank_id) DO UPDATE SET
-                discord_role_id = excluded.discord_role_id,
-                discord_role_name = excluded.discord_role_name
-        `);
-
-        const transaction = db.transaction((items) => {
-            for (const binding of items) {
-                insert.run(
-                    guildId,
-                    binding.groupId,
-                    binding.robloxRankId,
-                    binding.robloxRankName || null,
-                    binding.discordRoleId,
-                    binding.discordRoleName || null
-                );
-            }
-        });
-
-        transaction(bindings);
-        logger.info(`Bulk imported ${bindings.length} bindings for guild ${guildId}`);
     }
 
     /**
@@ -148,6 +133,8 @@ class BindingsRepository {
             robloxRankName: b.roblox_rank_name,
             discordRoleId: b.discord_role_id,
             discordRoleName: b.discord_role_name,
+            priority: b.priority || 0,
+            nicknameTemplate: b.nickname_template,
         }));
     }
 }

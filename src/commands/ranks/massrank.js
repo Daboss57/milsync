@@ -43,7 +43,7 @@ module.exports = {
     async autocomplete(interaction) {
         const robloxService = require('../../services/robloxService');
         const focusedValue = interaction.options.getFocused().toLowerCase();
-        const groupId = interaction.options.getString('group') || config.roblox.groupId;
+        const groupId = interaction.options.getString('group') || config.roblox.defaultGroupId;
 
         try {
             const roles = await robloxService.getGroupRoles(groupId);

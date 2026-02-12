@@ -1,5 +1,6 @@
 /**
  * Role Sync Service - Handles Discord role synchronization with Roblox ranks
+ * Supports priority-based bindings and nickname templates (RoWifi-style)
  */
 
 const LinkedAccountsRepository = require('../database/repositories/linkedAccounts');
@@ -12,7 +13,7 @@ const config = require('../config');
 
 class RoleSyncService {
     /**
-     * Sync roles for a single Discord member
+     * Sync roles and nickname for a single Discord member
      */
     static async syncMember(member, guildId, groupId = null) {
         try {
@@ -27,7 +28,7 @@ class RoleSyncService {
             }
 
             // Get bindings for this guild
-            const bindings = groupId 
+            const bindings = groupId
                 ? BindingsRepository.getByGuildAndGroup(guildId, groupId)
                 : BindingsRepository.getByGuild(guildId);
 
@@ -50,19 +51,21 @@ class RoleSyncService {
 
             const rolesToAdd = [];
             const rolesToRemove = [];
-            const allBoundRoles = bindings.map(b => b.discord_role_id);
+            const matchedBindings = []; // Bindings that match the user's current rank
 
             // Process each group
             for (const [grpId, grpBindings] of Object.entries(bindingsByGroup)) {
-                // Get user's rank in this group
                 const rankInfo = await robloxService.getUserGroupRank(linked.roblox_id, grpId);
-                
+
                 for (const binding of grpBindings) {
-                    const shouldHaveRole = rankInfo?.inGroup && rankInfo.rank === binding.roblox_rank_id;
+                    const shouldHaveRole = rankInfo?.inGroup && Number(rankInfo.rank) === Number(binding.roblox_rank_id);
                     const hasRole = member.roles.cache.has(binding.discord_role_id);
 
-                    if (shouldHaveRole && !hasRole) {
-                        rolesToAdd.push(binding.discord_role_id);
+                    if (shouldHaveRole) {
+                        matchedBindings.push({ ...binding, rankInfo });
+                        if (!hasRole) {
+                            rolesToAdd.push(binding.discord_role_id);
+                        }
                     } else if (!shouldHaveRole && hasRole) {
                         rolesToRemove.push(binding.discord_role_id);
                     }
@@ -91,13 +94,43 @@ class RoleSyncService {
                 }
             }
 
-            logger.info(`Synced roles for ${member.user.tag}: +${addedCount}, -${removedCount}`);
+            // Apply nickname from highest-priority binding that has a template
+            let nicknameApplied = null;
+            if (matchedBindings.length > 0) {
+                // Sort by priority descending and find the first one with a template
+                const sortedBindings = matchedBindings.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+                const templateBinding = sortedBindings.find(b => b.nickname_template);
+
+                if (templateBinding) {
+                    try {
+                        const robloxUser = await robloxService.getUserById(linked.roblox_id);
+                        const nickname = this.resolveTemplate(
+                            templateBinding.nickname_template,
+                            {
+                                robloxUsername: robloxUser?.name || linked.roblox_username,
+                                displayName: robloxUser?.displayName || linked.roblox_username,
+                                discordName: member.user.username,
+                                rankName: templateBinding.roblox_rank_name || '',
+                            }
+                        );
+
+                        await member.setNickname(nickname);
+                        nicknameApplied = nickname;
+                        logger.info(`Set nickname for ${member.user.tag}: ${nickname}`);
+                    } catch (err) {
+                        logger.warn(`Failed to set nickname for ${member.id}: ${err.message}`);
+                    }
+                }
+            }
+
+            logger.info(`Synced roles for ${member.user.tag}: +${addedCount}, -${removedCount}${nicknameApplied ? `, nick: ${nicknameApplied}` : ''}`);
 
             return {
                 success: true,
                 rolesAdded: addedCount,
                 rolesRemoved: removedCount,
                 robloxUsername: linked.roblox_username,
+                nicknameApplied,
             };
         } catch (error) {
             logger.error(`Failed to sync member ${member.id}: ${error.message}`);
@@ -107,6 +140,25 @@ class RoleSyncService {
                 message: error.message,
             };
         }
+    }
+
+    /**
+     * Resolve a nickname template with user data
+     * Supported vars: {roblox-username}, {display-name}, {discord-name}, {rank-name}
+     */
+    static resolveTemplate(template, data) {
+        let nickname = template
+            .replace(/\{roblox-username\}/gi, data.robloxUsername || '')
+            .replace(/\{display-name\}/gi, data.displayName || '')
+            .replace(/\{discord-name\}/gi, data.discordName || '')
+            .replace(/\{rank-name\}/gi, data.rankName || '')
+            // Legacy format support
+            .replace(/\{roblox\}/gi, data.robloxUsername || '')
+            .replace(/\{display\}/gi, data.displayName || '')
+            .replace(/\{discord\}/gi, data.discordName || '');
+
+        // Truncate to Discord's 32 character limit
+        return nickname.substring(0, 32);
     }
 
     /**
@@ -122,7 +174,6 @@ class RoleSyncService {
         };
 
         try {
-            // Fetch all members
             const members = await guild.members.fetch();
             results.total = members.size;
 
@@ -134,7 +185,7 @@ class RoleSyncService {
                 }
 
                 const result = await this.syncMember(member, guild.id);
-                
+
                 if (result.success) {
                     results.synced++;
                 } else if (result.error === 'not_verified') {
@@ -175,7 +226,7 @@ class RoleSyncService {
 
         const roles = [];
         const bindingsByGroup = {};
-        
+
         for (const binding of bindings) {
             if (!bindingsByGroup[binding.group_id]) {
                 bindingsByGroup[binding.group_id] = [];
@@ -185,16 +236,18 @@ class RoleSyncService {
 
         for (const [groupId, grpBindings] of Object.entries(bindingsByGroup)) {
             const rankInfo = await robloxService.getUserGroupRank(linked.roblox_id, groupId);
-            
+
             if (rankInfo?.inGroup) {
-                const matchingBinding = grpBindings.find(b => b.roblox_rank_id === rankInfo.rank);
-                if (matchingBinding) {
+                const matchingBindings = grpBindings.filter(b => Number(b.roblox_rank_id) === Number(rankInfo.rank));
+                for (const matchingBinding of matchingBindings) {
                     roles.push({
                         roleId: matchingBinding.discord_role_id,
                         roleName: matchingBinding.discord_role_name,
                         groupId,
                         rank: rankInfo.rank,
                         rankName: rankInfo.roleName,
+                        priority: matchingBinding.priority || 0,
+                        template: matchingBinding.nickname_template,
                     });
                 }
             }
@@ -209,9 +262,9 @@ class RoleSyncService {
     }
 
     /**
-     * Update Discord nickname to match Roblox username
+     * Update Discord nickname to match Roblox username (standalone)
      */
-    static async syncNickname(member, format = '{roblox}') {
+    static async syncNickname(member, format = '{roblox-username}') {
         try {
             const linked = LinkedAccountsRepository.getByDiscordId(member.id);
             if (!linked) {
@@ -223,16 +276,15 @@ class RoleSyncService {
                 return { success: false, error: 'roblox_error' };
             }
 
-            let nickname = format
-                .replace('{roblox}', robloxUser.name)
-                .replace('{display}', robloxUser.displayName)
-                .replace('{discord}', member.user.username);
-
-            // Truncate to Discord's 32 character limit
-            nickname = nickname.substring(0, 32);
+            const nickname = this.resolveTemplate(format, {
+                robloxUsername: robloxUser.name,
+                displayName: robloxUser.displayName,
+                discordName: member.user.username,
+                rankName: '',
+            });
 
             await member.setNickname(nickname);
-            
+
             return { success: true, nickname };
         } catch (error) {
             logger.error(`Failed to sync nickname for ${member.id}: ${error.message}`);

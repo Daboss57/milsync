@@ -38,7 +38,7 @@ async function handleCommand(interaction) {
 
     // Check cooldowns
     const { cooldowns } = interaction.client;
-    
+
     if (!cooldowns.has(command.data.name)) {
         cooldowns.set(command.data.name, new Collection());
     }
@@ -55,7 +55,7 @@ async function handleCommand(interaction) {
             return interaction.reply({
                 content: `⏳ Please wait, you can use \`/${command.data.name}\` again <t:${expiredTimestamp}:R>.`,
                 flags: MessageFlags.Ephemeral,
-            }).catch(() => {});
+            }).catch(() => { });
         }
     }
 
@@ -105,15 +105,24 @@ async function handleButton(interaction) {
             );
 
             if (result.success) {
-                // Sync roles
+                // Sync roles + nickname
                 const member = await interaction.guild.members.fetch(interaction.user.id);
-                await RoleSyncService.syncMember(member, interaction.guildId);
+                const syncResult = await RoleSyncService.syncMember(member, interaction.guildId);
 
                 const embed = new EmbedBuilder()
                     .setColor(0x57F287)
                     .setTitle('✅ Verification Complete!')
                     .setDescription(`You are now verified as **${result.robloxUser.name}**!`)
-                    .setFooter({ text: 'Your roles have been synced automatically' });
+                    .addFields(
+                        { name: 'Roles Added', value: (syncResult.rolesAdded || 0).toString(), inline: true },
+                        { name: 'Roles Removed', value: (syncResult.rolesRemoved || 0).toString(), inline: true },
+                    );
+
+                if (syncResult.nicknameApplied) {
+                    embed.addFields({ name: 'Nickname Set', value: `\`${syncResult.nicknameApplied}\``, inline: true });
+                }
+
+                embed.setFooter({ text: 'Your roles and nickname have been synced automatically' });
 
                 await interaction.editReply({ embeds: [embed] });
             } else {
@@ -124,7 +133,7 @@ async function handleButton(interaction) {
         else if (action === 'app_approve' || action === 'app_deny') {
             const ApplicationsRepository = require('../database/repositories/applications');
             const applicationId = params[0];
-            
+
             const application = ApplicationsRepository.getById(applicationId);
             if (!application) {
                 return interaction.reply({ content: '❌ Application not found.', flags: MessageFlags.Ephemeral });
@@ -144,7 +153,7 @@ async function handleButton(interaction) {
         }
     } catch (error) {
         logger.error(`Error handling button ${interaction.customId}:`, error);
-        await interaction.reply({ content: '❌ An error occurred.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.reply({ content: '❌ An error occurred.', flags: MessageFlags.Ephemeral }).catch(() => { });
     }
 }
 

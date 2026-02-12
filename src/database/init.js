@@ -102,10 +102,16 @@ function createTables() {
             roblox_rank_name TEXT,
             discord_role_id TEXT NOT NULL,
             discord_role_name TEXT,
+            priority INTEGER DEFAULT 0,
+            nickname_template TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(guild_id, group_id, roblox_rank_id, discord_role_id)
         )
     `);
+
+    // Add new columns to existing tables (safe - no-ops if columns exist)
+    try { db.run(`ALTER TABLE role_bindings ADD COLUMN priority INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
+    try { db.run(`ALTER TABLE role_bindings ADD COLUMN nickname_template TEXT`); } catch (e) { /* already exists */ }
 
     // Groups configuration table
     db.run(`

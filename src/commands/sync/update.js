@@ -1,5 +1,6 @@
 /**
  * Update Command - Sync Discord roles with Roblox ranks
+ * Can update yourself or another user
  */
 
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
@@ -9,19 +10,29 @@ const config = require('../../config');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('update')
-        .setDescription('Sync your Discord roles with your Roblox ranks'),
+        .setDescription('Sync Discord roles & nickname with Roblox ranks')
+        .addUserOption(option =>
+            option.setName('user')
+                .setDescription('User to update (defaults to yourself)')
+                .setRequired(false)
+        ),
 
     cooldown: config.rateLimits.syncCooldown,
 
     async execute(interaction) {
         await interaction.deferReply({ flags: 64 /* MessageFlags.Ephemeral */ });
 
-        const member = await interaction.guild.members.fetch(interaction.user.id);
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const member = await interaction.guild.members.fetch(targetUser.id);
+        const isSelf = targetUser.id === interaction.user.id;
+
         const result = await RoleSyncService.syncMember(member, interaction.guildId);
 
         if (!result.success) {
             const errorMessages = {
-                'not_verified': 'You need to verify your Roblox account first. Use `/verify` to get started.',
+                'not_verified': isSelf
+                    ? 'You need to verify your Roblox account first. Use `/verify` to get started.'
+                    : `${targetUser} is not verified.`,
                 'no_bindings': 'No role bindings have been configured for this server.',
             };
 
@@ -33,12 +44,19 @@ module.exports = {
         const embed = new EmbedBuilder()
             .setColor(config.colors.success)
             .setTitle('✅ Roles Synced')
-            .setDescription(`Your Discord roles have been updated based on your Roblox account.`)
+            .setDescription(isSelf
+                ? 'Your Discord roles have been updated based on your Roblox account.'
+                : `Updated ${targetUser}'s roles based on their Roblox account.`
+            )
             .addFields(
                 { name: 'Roblox Account', value: result.robloxUsername, inline: true },
                 { name: 'Roles Added', value: result.rolesAdded.toString(), inline: true },
                 { name: 'Roles Removed', value: result.rolesRemoved.toString(), inline: true }
             );
+
+        if (result.nicknameApplied) {
+            embed.addFields({ name: 'Nickname Set', value: `\`${result.nicknameApplied}\``, inline: false });
+        }
 
         await interaction.editReply({ embeds: [embed] });
     },
