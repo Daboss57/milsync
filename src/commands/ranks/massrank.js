@@ -105,14 +105,14 @@ module.exports = {
                     groupId
                 );
 
-                // Sync Discord roles
-                if (result.success) {
-                    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
-                    if (member) {
-                        const RoleSyncService = require('../../services/roleSyncService');
-                        await RoleSyncService.syncMember(member, interaction.guildId).catch(() => { });
-                    }
-                }
+                // Sync Discord roles (disabled)
+                // if (result.success) {
+                //     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+                //     if (member) {
+                //         const RoleSyncService = require('../../services/roleSyncService');
+                //         await RoleSyncService.syncMember(member, interaction.guildId).catch(() => { });
+                //     }
+                // }
 
                 return { user, result };
             })

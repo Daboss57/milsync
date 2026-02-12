@@ -66,13 +66,13 @@ module.exports = {
             });
         }
 
-        // Sync roles
-        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
-        let rolesSynced = false;
-        if (member) {
-            const syncResult = await RoleSyncService.syncMember(member, interaction.guildId, groupId);
-            rolesSynced = syncResult.success;
-        }
+        // Sync roles (disabled per request)
+        // const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+        // let rolesSynced = false;
+        // if (member) {
+        //     const syncResult = await RoleSyncService.syncMember(member, interaction.guildId, groupId);
+        //     rolesSynced = syncResult.success;
+        // }
 
         const embed = new EmbedBuilder()
             .setColor(config.colors.success)
@@ -85,9 +85,9 @@ module.exports = {
             )
             .setTimestamp();
 
-        if (rolesSynced) {
-            embed.setFooter({ text: 'Discord roles have been updated' });
-        }
+        // if (rolesSynced) {
+        //     embed.setFooter({ text: 'Discord roles have been updated' });
+        // }
 
         await interaction.editReply({ embeds: [embed] });
 

@@ -40,11 +40,10 @@ module.exports = {
 
         const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
 
-        const result = await RankService.demoteAndSync(
+        const result = await RankService.demote(
             interaction.guildId,
             targetUser.id,
             interaction.user.id,
-            member,
             groupId
         );
 
@@ -70,9 +69,9 @@ module.exports = {
             )
             .setTimestamp();
 
-        if (result.rolesSynced) {
-            embed.setFooter({ text: 'Discord roles have been updated' });
-        }
+        // if (result.rolesSynced) {
+        //     embed.setFooter({ text: 'Discord roles have been updated' });
+        // }
 
         await interaction.editReply({ embeds: [embed] });
 

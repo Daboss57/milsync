@@ -49,48 +49,82 @@ class RoleSyncService {
                 bindingsByGroup[binding.group_id].push(binding);
             }
 
-            const rolesToAdd = [];
-            const rolesToRemove = [];
-            const matchedBindings = []; // Bindings that match the user's current rank
+            const allowedRoles = new Set();
+            const managedRoles = new Set();
+            const matchedBindings = [];
 
-            // Process each group
+            // 1. Identify all roles the user SHOULD have (allowedRoles)
+            //    and all roles that are managed by the bot (managedRoles)
             for (const [grpId, grpBindings] of Object.entries(bindingsByGroup)) {
                 const rankInfo = await robloxService.getUserGroupRank(linked.roblox_id, grpId);
 
                 for (const binding of grpBindings) {
-                    const shouldHaveRole = rankInfo?.inGroup && Number(rankInfo.rank) === Number(binding.roblox_rank_id);
-                    const hasRole = member.roles.cache.has(binding.discord_role_id);
+                    managedRoles.add(binding.discord_role_id);
 
-                    if (shouldHaveRole) {
+                    if (rankInfo?.inGroup && Number(rankInfo.rank) === Number(binding.roblox_rank_id)) {
+                        allowedRoles.add(binding.discord_role_id);
                         matchedBindings.push({ ...binding, rankInfo });
-                        if (!hasRole) {
-                            rolesToAdd.push(binding.discord_role_id);
-                        }
-                    } else if (!shouldHaveRole && hasRole) {
-                        rolesToRemove.push(binding.discord_role_id);
                     }
                 }
             }
 
-            // Apply role changes
-            let addedCount = 0;
-            let removedCount = 0;
+            // 2. Calculate diff
+            const rolesToAdd = [];
+            const rolesToRemove = [];
 
-            for (const roleId of rolesToAdd) {
-                try {
-                    await member.roles.add(roleId);
-                    addedCount++;
-                } catch (err) {
-                    logger.warn(`Failed to add role ${roleId} to ${member.id}: ${err.message}`);
+            // Add: Role is allowed AND user doesn't have it
+            for (const roleId of allowedRoles) {
+                if (!member.roles.cache.has(roleId)) {
+                    rolesToAdd.push(roleId);
                 }
             }
 
-            for (const roleId of rolesToRemove) {
+            // Remove: Role is managed AND user has it AND it's NOT allowed
+            for (const roleId of managedRoles) {
+                if (member.roles.cache.has(roleId) && !allowedRoles.has(roleId)) {
+                    rolesToRemove.push(roleId);
+                }
+            }
+
+            // 3. Apply changes in batch (much faster)
+            let addedCount = 0;
+            let removedCount = 0;
+
+            if (rolesToAdd.length > 0) {
                 try {
-                    await member.roles.remove(roleId);
-                    removedCount++;
+                    await member.roles.add(rolesToAdd);
+                    addedCount = rolesToAdd.length;
+                    logger.info(`Added ${addedCount} roles to ${member.user.tag}`);
                 } catch (err) {
-                    logger.warn(`Failed to remove role ${roleId} from ${member.id}: ${err.message}`);
+                    logger.warn(`Failed to batch add roles to ${member.user.tag}: ${err.message}`);
+                    // Fallback to individual
+                    for (const roleId of rolesToAdd) {
+                        try {
+                            await member.roles.add(roleId);
+                            addedCount++;
+                        } catch (e) {
+                            logger.warn(`Failed to add role ${roleId}: ${e.message}`);
+                        }
+                    }
+                }
+            }
+
+            if (rolesToRemove.length > 0) {
+                try {
+                    await member.roles.remove(rolesToRemove);
+                    removedCount = rolesToRemove.length;
+                    logger.info(`Removed ${removedCount} roles from ${member.user.tag}`);
+                } catch (err) {
+                    logger.warn(`Failed to batch remove roles from ${member.user.tag}: ${err.message}`);
+                    // Fallback to individual
+                    for (const roleId of rolesToRemove) {
+                        try {
+                            await member.roles.remove(roleId);
+                            removedCount++;
+                        } catch (e) {
+                            logger.warn(`Failed to remove role ${roleId}: ${e.message}`);
+                        }
+                    }
                 }
             }
 
