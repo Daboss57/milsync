@@ -27,8 +27,8 @@ module.exports = {
             option.setName('group')
                 .setDescription('Group ID (uses default if not specified)')
                 .setRequired(false)
-        )
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+        ),
+    // .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 
     async execute(interaction) {
         await interaction.deferReply();

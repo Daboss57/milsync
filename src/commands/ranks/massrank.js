@@ -26,7 +26,7 @@ const builder = new SlashCommandBuilder()
             .setDescription('Group ID (uses default if not specified)')
             .setRequired(false)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles);
+// .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles);
 
 // Add user options 2-10 (all optional)
 for (let i = 2; i <= 10; i++) {
