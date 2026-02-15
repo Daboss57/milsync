@@ -5,6 +5,7 @@
 
 const LinkedAccountsRepository = require('../database/repositories/linkedAccounts');
 const BindingsRepository = require('../database/repositories/bindings');
+const GroupBindingsRepository = require('../database/repositories/groupBindings');
 const GuildConfigRepository = require('../database/repositories/guildConfig');
 const AuditLogRepository = require('../database/repositories/auditLog');
 const robloxService = require('./robloxService');
@@ -27,12 +28,15 @@ class RoleSyncService {
                 };
             }
 
-            // Get bindings for this guild
-            const bindings = groupId
+            // Get rank bindings for this guild
+            const rankBindings = groupId
                 ? BindingsRepository.getByGuildAndGroup(guildId, groupId)
                 : BindingsRepository.getByGuild(guildId);
 
-            if (bindings.length === 0) {
+            // Get group bindings for this guild
+            const groupBindings = GroupBindingsRepository.getByGuild(guildId);
+
+            if (rankBindings.length === 0 && groupBindings.length === 0) {
                 return {
                     success: false,
                     error: 'no_bindings',
@@ -40,28 +44,55 @@ class RoleSyncService {
                 };
             }
 
-            // Group bindings by group ID
-            const bindingsByGroup = {};
-            for (const binding of bindings) {
-                if (!bindingsByGroup[binding.group_id]) {
-                    bindingsByGroup[binding.group_id] = [];
+            // Group rank bindings by group ID
+            const rankBindingsByGroup = {};
+            for (const binding of rankBindings) {
+                if (!rankBindingsByGroup[binding.group_id]) {
+                    rankBindingsByGroup[binding.group_id] = [];
                 }
-                bindingsByGroup[binding.group_id].push(binding);
+                rankBindingsByGroup[binding.group_id].push(binding);
+            }
+
+            // Group group-bindings by group ID
+            const groupBindingsByGroup = {};
+            for (const binding of groupBindings) {
+                if (!groupBindingsByGroup[binding.group_id]) {
+                    groupBindingsByGroup[binding.group_id] = [];
+                }
+                groupBindingsByGroup[binding.group_id].push(binding);
             }
 
             const allowedRoles = new Set();
             const managedRoles = new Set();
             const matchedBindings = [];
 
-            // 1. Identify all roles the user SHOULD have (allowedRoles)
-            //    and all roles that are managed by the bot (managedRoles)
-            for (const [grpId, grpBindings] of Object.entries(bindingsByGroup)) {
+            // Collect all unique group IDs we need to check
+            const allGroupIds = new Set([
+                ...Object.keys(rankBindingsByGroup),
+                ...Object.keys(groupBindingsByGroup),
+            ]);
+
+            // 1. Check each group and evaluate both rank binds and group binds
+            for (const grpId of allGroupIds) {
                 const rankInfo = await robloxService.getUserGroupRank(linked.roblox_id, grpId);
 
-                for (const binding of grpBindings) {
+                // Process rank bindings for this group
+                const grpRankBindings = rankBindingsByGroup[grpId] || [];
+                for (const binding of grpRankBindings) {
                     managedRoles.add(binding.discord_role_id);
 
                     if (rankInfo?.inGroup && Number(rankInfo.rank) === Number(binding.roblox_rank_id)) {
+                        allowedRoles.add(binding.discord_role_id);
+                        matchedBindings.push({ ...binding, rankInfo });
+                    }
+                }
+
+                // Process group bindings for this group (membership-only, any rank)
+                const grpGroupBindings = groupBindingsByGroup[grpId] || [];
+                for (const binding of grpGroupBindings) {
+                    managedRoles.add(binding.discord_role_id);
+
+                    if (rankInfo?.inGroup) {
                         allowedRoles.add(binding.discord_role_id);
                         matchedBindings.push({ ...binding, rankInfo });
                     }
@@ -253,27 +284,56 @@ class RoleSyncService {
             return { success: false, error: 'not_verified' };
         }
 
-        const bindings = BindingsRepository.getByGuild(guildId);
-        if (bindings.length === 0) {
+        const rankBindings = BindingsRepository.getByGuild(guildId);
+        const groupBindings = GroupBindingsRepository.getByGuild(guildId);
+
+        if (rankBindings.length === 0 && groupBindings.length === 0) {
             return { success: false, error: 'no_bindings' };
         }
 
         const roles = [];
-        const bindingsByGroup = {};
+        const rankBindingsByGroup = {};
+        const groupBindingsByGroup = {};
 
-        for (const binding of bindings) {
-            if (!bindingsByGroup[binding.group_id]) {
-                bindingsByGroup[binding.group_id] = [];
+        for (const binding of rankBindings) {
+            if (!rankBindingsByGroup[binding.group_id]) {
+                rankBindingsByGroup[binding.group_id] = [];
             }
-            bindingsByGroup[binding.group_id].push(binding);
+            rankBindingsByGroup[binding.group_id].push(binding);
         }
 
-        for (const [groupId, grpBindings] of Object.entries(bindingsByGroup)) {
+        for (const binding of groupBindings) {
+            if (!groupBindingsByGroup[binding.group_id]) {
+                groupBindingsByGroup[binding.group_id] = [];
+            }
+            groupBindingsByGroup[binding.group_id].push(binding);
+        }
+
+        const allGroupIds = new Set([
+            ...Object.keys(rankBindingsByGroup),
+            ...Object.keys(groupBindingsByGroup),
+        ]);
+
+        for (const groupId of allGroupIds) {
             const rankInfo = await robloxService.getUserGroupRank(linked.roblox_id, groupId);
 
             if (rankInfo?.inGroup) {
-                const matchingBindings = grpBindings.filter(b => Number(b.roblox_rank_id) === Number(rankInfo.rank));
-                for (const matchingBinding of matchingBindings) {
+                // Rank bindings: match specific rank
+                const matchingRankBindings = (rankBindingsByGroup[groupId] || []).filter(b => Number(b.roblox_rank_id) === Number(rankInfo.rank));
+                for (const matchingBinding of matchingRankBindings) {
+                    roles.push({
+                        roleId: matchingBinding.discord_role_id,
+                        roleName: matchingBinding.discord_role_name,
+                        groupId,
+                        rank: rankInfo.rank,
+                        rankName: rankInfo.roleName,
+                        priority: matchingBinding.priority || 0,
+                        template: matchingBinding.nickname_template,
+                    });
+                }
+
+                // Group bindings: match any rank (membership-only)
+                for (const matchingBinding of (groupBindingsByGroup[groupId] || [])) {
                     roles.push({
                         roleId: matchingBinding.discord_role_id,
                         roleName: matchingBinding.discord_role_name,

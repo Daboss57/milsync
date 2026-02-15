@@ -113,6 +113,21 @@ function createTables() {
     try { db.run(`ALTER TABLE role_bindings ADD COLUMN priority INTEGER DEFAULT 0`); } catch (e) { /* already exists */ }
     try { db.run(`ALTER TABLE role_bindings ADD COLUMN nickname_template TEXT`); } catch (e) { /* already exists */ }
 
+    // Group bindings table (assign roles based on group membership)
+    db.run(`
+        CREATE TABLE IF NOT EXISTS group_bindings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            discord_role_id TEXT NOT NULL,
+            discord_role_name TEXT,
+            priority INTEGER DEFAULT 0,
+            nickname_template TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(guild_id, group_id, discord_role_id)
+        )
+    `);
+
     // Groups configuration table
     db.run(`
         CREATE TABLE IF NOT EXISTS guild_groups (
@@ -252,6 +267,7 @@ function createTables() {
     db.run(`CREATE INDEX IF NOT EXISTS idx_linked_discord ON linked_accounts(discord_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_linked_roblox ON linked_accounts(roblox_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_bindings_guild ON role_bindings(guild_id)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_group_bindings_guild ON group_bindings(guild_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_xp_guild ON user_xp(guild_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_audit_guild ON audit_logs(guild_id)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)`);

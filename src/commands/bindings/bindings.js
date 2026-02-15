@@ -4,6 +4,7 @@
 
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const BindingsRepository = require('../../database/repositories/bindings');
+const GroupBindingsRepository = require('../../database/repositories/groupBindings');
 const config = require('../../config');
 
 module.exports = {
@@ -24,9 +25,13 @@ module.exports = {
             ? BindingsRepository.getByGuildAndGroup(interaction.guildId, groupId)
             : BindingsRepository.getByGuild(interaction.guildId);
 
-        if (bindings.length === 0) {
+        const groupBindings = groupId
+            ? GroupBindingsRepository.getByGuildAndGroup(interaction.guildId, groupId)
+            : GroupBindingsRepository.getByGuild(interaction.guildId);
+
+        if (bindings.length === 0 && groupBindings.length === 0) {
             return interaction.reply({
-                content: '❌ No role bindings have been configured. Use `/bind` to create one.',
+                content: '❌ No role bindings have been configured. Use `/bind` or `/groupbind` to create one.',
                 flags: 64 /* MessageFlags.Ephemeral */,
             });
         }
@@ -91,7 +96,55 @@ module.exports = {
             }
         }
 
-        embeds[embeds.length - 1].setFooter({ text: 'Use /bind to add or /unbind to remove bindings' });
+
+        // Add group bindings section
+        if (groupBindings.length > 0) {
+            const groupedByGroup = {};
+            for (const binding of groupBindings) {
+                if (!groupedByGroup[binding.group_id]) {
+                    groupedByGroup[binding.group_id] = {
+                        roles: [],
+                        highestPriority: 0,
+                        template: null,
+                    };
+                }
+                const group = groupedByGroup[binding.group_id];
+                group.roles.push(binding.discord_role_id);
+                if ((binding.priority || 0) > group.highestPriority) {
+                    group.highestPriority = binding.priority || 0;
+                }
+                if (binding.nickname_template && !group.template) {
+                    group.template = binding.nickname_template;
+                }
+            }
+
+            const groupEmbed = new EmbedBuilder()
+                .setColor(config.colors.primary)
+                .setTitle('Groupbinds')
+                .setDescription(`${Object.keys(groupedByGroup).length} group(s) configured`);
+
+            for (const [grpId, data] of Object.entries(groupedByGroup)) {
+                const lines = [];
+                if (data.template) lines.push(`Template: ${data.template}`);
+                lines.push(`Priority: ${data.highestPriority}`);
+                lines.push(`Roles: ${data.roles.map(r => `<@&${r}>`).join(' ')}`);
+
+                groupEmbed.addFields({
+                    name: `Group: ${grpId}`,
+                    value: lines.join('\n'),
+                    inline: true,
+                });
+
+                if (groupEmbed.data.fields.length >= 25) break;
+            }
+
+            embeds.push(groupEmbed);
+        }
+
+        // Set footer on the last embed
+        if (embeds.length > 0) {
+            embeds[embeds.length - 1].setFooter({ text: 'Use /bind, /unbind, /groupbind, /groupunbind to manage bindings' });
+        }
 
         await interaction.reply({ embeds });
     },
