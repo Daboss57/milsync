@@ -20,6 +20,13 @@ module.exports = {
     cooldown: config.rateLimits.syncCooldown,
 
     async execute(interaction) {
+        if (!interaction.guild) {
+            return interaction.reply({
+                content: '❌ This command can only be used in a server, not in DMs.',
+                flags: 64 /* MessageFlags.Ephemeral */,
+            });
+        }
+
         await interaction.deferReply({ flags: 64 /* MessageFlags.Ephemeral */ });
 
         const targetUser = interaction.options.getUser('user') || interaction.user;

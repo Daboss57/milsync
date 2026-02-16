@@ -235,6 +235,19 @@ function createTables() {
         )
     `);
 
+    // OAuth2 pending states table
+    db.run(`
+        CREATE TABLE IF NOT EXISTS oauth_states (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            state TEXT UNIQUE NOT NULL,
+            discord_id TEXT UNIQUE NOT NULL,
+            guild_id TEXT NOT NULL,
+            is_reverify INTEGER DEFAULT 0,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
     // API keys for in-game integration
     db.run(`
         CREATE TABLE IF NOT EXISTS api_keys (

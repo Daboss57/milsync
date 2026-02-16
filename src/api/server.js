@@ -57,7 +57,7 @@ async function startApiServer(client) {
         try {
             const { robloxId } = req.params;
             const linked = LinkedAccountsRepository.getByRobloxId(robloxId);
-            
+
             if (!linked) {
                 return res.status(404).json({ error: 'User not found', verified: false });
             }
@@ -79,14 +79,14 @@ async function startApiServer(client) {
         try {
             const { robloxId } = req.params;
             const { groupId } = req.query;
-            
+
             const targetGroupId = groupId || config.roblox.defaultGroupId;
             if (!targetGroupId) {
                 return res.status(400).json({ error: 'No group ID specified' });
             }
 
             const rankInfo = await robloxService.getUserGroupRank(robloxId, targetGroupId);
-            
+
             if (!rankInfo) {
                 return res.status(500).json({ error: 'Failed to fetch rank' });
             }
@@ -108,7 +108,7 @@ async function startApiServer(client) {
     app.post('/api/promote', async (req, res) => {
         try {
             const { robloxId, groupId } = req.body;
-            
+
             if (!robloxId) {
                 return res.status(400).json({ error: 'robloxId is required' });
             }
@@ -146,7 +146,7 @@ async function startApiServer(client) {
     app.post('/api/demote', async (req, res) => {
         try {
             const { robloxId, groupId } = req.body;
-            
+
             if (!robloxId) {
                 return res.status(400).json({ error: 'robloxId is required' });
             }
@@ -184,7 +184,7 @@ async function startApiServer(client) {
     app.post('/api/setrank', async (req, res) => {
         try {
             const { robloxId, rank, groupId } = req.body;
-            
+
             if (!robloxId || rank === undefined) {
                 return res.status(400).json({ error: 'robloxId and rank are required' });
             }
@@ -224,7 +224,7 @@ async function startApiServer(client) {
         try {
             const { robloxId } = req.params;
             const linked = LinkedAccountsRepository.getByRobloxId(robloxId);
-            
+
             res.json({
                 verified: !!linked,
                 discordId: linked?.discord_id || null,
@@ -235,6 +235,63 @@ async function startApiServer(client) {
         }
     });
 
+    // ── OAuth2 Callback Route (public — no API key) ──
+    if (config.features.enableOAuth) {
+        const OAuthService = require('../services/oauthService');
+        const RoleSyncService = require('../services/roleSyncService');
+
+        app.get('/oauth/callback', async (req, res) => {
+            const { code, state, error: oauthError } = req.query;
+
+            if (oauthError) {
+                logger.warn(`OAuth error from Roblox: ${oauthError}`);
+                return res.status(400).send(renderOAuthPage(false, 'Authorization was denied or an error occurred.'));
+            }
+
+            if (!code || !state) {
+                return res.status(400).send(renderOAuthPage(false, 'Missing authorization code or state.'));
+            }
+
+            try {
+                const result = await OAuthService.handleCallback(code, state);
+
+                if (!result.success) {
+                    return res.send(renderOAuthPage(false, result.message));
+                }
+
+                // Try to sync roles in the guild
+                try {
+                    const guild = await discordClient.guilds.fetch(result.guildId);
+                    const member = await guild.members.fetch(result.discordId);
+                    await RoleSyncService.syncMember(member, result.guildId);
+                    logger.info(`Auto-synced roles for ${result.discordId} after OAuth verification`);
+                } catch (syncError) {
+                    logger.warn(`Could not auto-sync roles after OAuth verify: ${syncError.message}`);
+                }
+
+                // Try to DM the user
+                try {
+                    const user = await discordClient.users.fetch(result.discordId);
+                    await user.send({
+                        embeds: [{
+                            title: '✅ Verification Complete!',
+                            description: `You are now verified as **${result.robloxUser.name}** (${result.robloxUser.displayName}).`,
+                            color: 0x00d166,
+                            timestamp: new Date().toISOString(),
+                        }],
+                    });
+                } catch (dmError) {
+                    logger.debug(`Could not DM user ${result.discordId}: ${dmError.message}`);
+                }
+
+                return res.send(renderOAuthPage(true, `You are now verified as ${result.robloxUser.name}!`));
+            } catch (error) {
+                logger.error('OAuth callback error:', error);
+                return res.status(500).send(renderOAuthPage(false, 'An unexpected error occurred.'));
+            }
+        });
+    }
+
     // Start server
     const port = config.api.port;
     app.listen(port, () => {
@@ -243,11 +300,42 @@ async function startApiServer(client) {
 }
 
 /**
+ * Render a simple HTML page for OAuth result
+ */
+function renderOAuthPage(success, message) {
+    const emoji = success ? '✅' : '❌';
+    const color = success ? '#00d166' : '#ed4245';
+    return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>MilSync Verification</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: #16213e; border-radius: 12px; padding: 40px; text-align: center; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+        .emoji { font-size: 48px; margin-bottom: 16px; }
+        h1 { color: ${color}; margin: 0 0 12px; font-size: 24px; }
+        p { color: #a0a0b0; line-height: 1.6; }
+        .close { margin-top: 20px; color: #666; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="emoji">${emoji}</div>
+        <h1>${success ? 'Verification Complete' : 'Verification Failed'}</h1>
+        <p>${message}</p>
+        <p class="close">You can close this tab and return to Discord.</p>
+    </div>
+</body>
+</html>`;
+}
+
+/**
  * Authenticate API key from request
  */
 function authenticateApiKey(req, res, next) {
     const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-    
+
     if (!apiKey) {
         return res.status(401).json({ error: 'API key required' });
     }

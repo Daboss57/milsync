@@ -21,6 +21,16 @@ const config = {
         groupsApiUrl: 'https://groups.roblox.com',
     },
 
+    // Roblox OAuth2 settings (for one-click verification)
+    robloxOAuth: {
+        clientId: process.env.ROBLOX_OAUTH_CLIENT_ID,
+        clientSecret: process.env.ROBLOX_OAUTH_CLIENT_SECRET,
+        redirectUri: process.env.OAUTH_REDIRECT_URI || 'http://localhost:3000/oauth/callback',
+        authorizeUrl: 'https://apis.roblox.com/oauth/v1/authorize',
+        tokenUrl: 'https://apis.roblox.com/oauth/v1/token',
+        userinfoUrl: 'https://apis.roblox.com/oauth/v1/userinfo',
+    },
+
     // Database settings
     database: {
         path: process.env.DATABASE_PATH || path.join(__dirname, '../../data/rpcommand.db'),
@@ -44,6 +54,7 @@ const config = {
         enableApplications: process.env.ENABLE_APPLICATIONS === 'true',
         enableIngameApi: process.env.ENABLE_INGAME_API === 'true',
         enableAutoSync: process.env.ENABLE_AUTO_SYNC === 'true',
+        enableOAuth: !!(process.env.ROBLOX_OAUTH_CLIENT_ID && process.env.ROBLOX_OAUTH_CLIENT_SECRET),
     },
 
     // Rate limiting
@@ -84,7 +95,7 @@ function validateConfig() {
     ];
 
     const missing = required.filter(([name, value]) => !value);
-    
+
     if (missing.length > 0) {
         throw new Error(
             `Missing required environment variables: ${missing.map(([name]) => name).join(', ')}\n` +
