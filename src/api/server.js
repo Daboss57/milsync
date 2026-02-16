@@ -52,6 +52,48 @@ async function startApiServer(client) {
         res.json({ status: 'ok', timestamp: new Date().toISOString() });
     });
 
+    // Privacy Policy page (required by Roblox OAuth)
+    app.get('/privacy', (req, res) => {
+        res.send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>MilSync - Privacy Policy</title>
+<style>body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#ddd;max-width:700px;margin:40px auto;padding:20px;line-height:1.7}h1{color:#5865F2}h2{color:#a0a0c0;margin-top:28px}a{color:#5865F2}</style>
+</head><body>
+<h1>MilSync Privacy Policy</h1>
+<p><em>Last updated: ${new Date().toLocaleDateString()}</em></p>
+<h2>What We Collect</h2>
+<p>When you verify through MilSync, we store your <strong>Discord user ID</strong> and <strong>Roblox user ID/username</strong> to link your accounts. We do not store passwords, tokens, or any other personal information.</p>
+<h2>How We Use It</h2>
+<p>Your linked account data is used solely to sync your Discord roles with your Roblox group ranks. We do not sell, share, or use your data for any other purpose.</p>
+<h2>Data Retention</h2>
+<p>Your data is stored as long as your account is linked. You can remove it at any time by using the <code>/unlink</code> command in Discord.</p>
+<h2>Third-Party Services</h2>
+<p>MilSync interacts with the <a href="https://roblox.com">Roblox API</a> and <a href="https://discord.com">Discord API</a> to provide its functionality.</p>
+<h2>Contact</h2>
+<p>For questions, contact the bot administrator in your Discord server.</p>
+</body></html>`);
+    });
+
+    // Terms of Service page (required by Roblox OAuth)
+    app.get('/terms', (req, res) => {
+        res.send(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>MilSync - Terms of Service</title>
+<style>body{font-family:'Segoe UI',sans-serif;background:#1a1a2e;color:#ddd;max-width:700px;margin:40px auto;padding:20px;line-height:1.7}h1{color:#5865F2}h2{color:#a0a0c0;margin-top:28px}</style>
+</head><body>
+<h1>MilSync Terms of Service</h1>
+<p><em>Last updated: ${new Date().toLocaleDateString()}</em></p>
+<h2>Acceptance</h2>
+<p>By using MilSync, you agree to these terms. If you do not agree, do not use the bot.</p>
+<h2>Service Description</h2>
+<p>MilSync is a Discord bot that links Discord accounts with Roblox accounts and syncs group roles. The service is provided as-is.</p>
+<h2>User Responsibilities</h2>
+<p>You must only link accounts that you own. Attempting to link someone else's account is prohibited and may result in a ban.</p>
+<h2>Termination</h2>
+<p>Server administrators may remove your access at any time. You can unlink your account using <code>/unlink</code>.</p>
+<h2>Limitation of Liability</h2>
+<p>MilSync is provided without warranty. We are not liable for any issues arising from the use of this bot.</p>
+</body></html>`);
+    });
+
     // Get user info by Roblox ID
     app.get('/api/user/:robloxId', async (req, res) => {
         try {
