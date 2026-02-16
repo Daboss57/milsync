@@ -34,7 +34,7 @@ class OAuthService {
             scope: 'openid profile',
             response_type: 'code',
             state: state,
-            prompt: 'consent',
+            prompt: 'consent select_account',
         });
 
         const url = `${config.robloxOAuth.authorizeUrl}?${params.toString()}`;
