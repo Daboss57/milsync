@@ -51,7 +51,7 @@ module.exports = {
                     'Click the button below to verify with Roblox. You\'ll be redirected to Roblox to authorize, then automatically verified!\n\n' +
                     '*Alternatively, use `/verify username:YourName` for manual code-in-bio verification.*'
                 )
-                .setColor(config.embeds.colors.info)
+                .setColor(0x5865F2)
                 .setFooter({ text: 'Link expires in 10 minutes' });
 
             const row = new ActionRowBuilder().addComponents(
@@ -96,7 +96,7 @@ module.exports = {
                     { name: 'Roblox Account', value: `${result.robloxUser.displayName} (@${result.robloxUser.name})`, inline: true },
                     { name: 'Expires In', value: `${result.expiresIn} minutes`, inline: true }
                 )
-                .setColor(config.embeds.colors.info)
+                .setColor(0x5865F2)
                 .setFooter({ text: 'You can remove the code from your bio after verification' });
 
             const row = new ActionRowBuilder().addComponents(
